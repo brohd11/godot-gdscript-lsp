@@ -19,8 +19,32 @@ func update(source: String, uri := "res://fixture.gd") -> Object:
 	service.update_document(uri, source, revision)
 	return service.document(uri)
 
+func check_unattached(manager: RefCounted, label: String) -> void:
+	check(not manager.is_attached(), label + " is unattached")
+	check(manager.parser == null, label + " has no parser")
+	check(not manager.cache_valid(), label + " has no valid cache")
+	check(not manager.parse_text() and not manager.parse_text(true), label + " reports no change")
+	check(manager.get_parse_revision() == -1 and manager.get_uri().is_empty(), label + " has no revision or URI")
+	check(manager.parse() == {} and manager.sparse_parse() == {"members": {}, "lines": {}}, label + " returns empty projections")
+
 func _run() -> void:
 	service = ClassDB.instantiate(&"GDScriptLanguageService")
+	# Direct structural reads require neither a workspace nor a scene-tree owner.
+	var lambda_source := "var callbacks = [\"é😀\", func(): return func(): return 1]\n"
+	for uri: String in ["res://structure.gd", "file://" + ProjectSettings.globalize_path("res://structure-file.gd"), "untitled:structure"]:
+		var structural := update(lambda_source, uri)
+		check(not service.is_ready() and not service.is_document_ready(uri), "semantic readiness is false without a workspace: " + uri)
+		var projection: Dictionary = structural.parse_script(uri)
+		check(projection[""].members.has("callbacks"), "structural members are immediately available: " + uri)
+		check(not structural.sparse_parse().members.is_empty(), "sparse structure is immediately available: " + uri)
+		var lambdas: Dictionary = projection[""].lambdas
+		check(lambdas.size() == 1, "one outer lambda")
+		for outer: Dictionary in lambdas.values():
+			check([outer.get("line_index"), outer.get("column_index"), outer.get("end_line"), outer.get("end_column")] == [0, 27, 0, 58], "outer lambda uses zero-based UTF-8 byte columns and exclusive end")
+			check(outer.has("lambdas") and outer.lambdas.size() == 1, "nested closures live under lambdas")
+			for inner: Dictionary in outer.get("lambdas", {}).values():
+				check([inner.get("line_index"), inner.get("column_index"), inner.get("end_line"), inner.get("end_column")] == [0, 42, 0, 58], "inner lambda preserves byte range keys")
+		service.close_document(uri)
 	var source := "enum { A, B, NEG = -3, NEXT }\nenum Named { FIRST, SECOND }\n@export var title: String = \"😀\"\nvar assigned = func(a: int) -> int: return a\nclass Inner:\n\tvar values = [1, (2)]\nfunc run(arg: int = 2):\n\tvar local = func(): return arg\n\tprint(arg)\n"
 	var document := update(source)
 	check(not service.is_ready(), "syntax works without opening a workspace")
@@ -66,14 +90,20 @@ func _run() -> void:
 	check(brackets.is_empty(), "disabling brackets clears retained reference")
 	document.set_bracket_mode(true)
 	check(not brackets.is_empty(), "reenabling brackets rebuilds retained reference")
-	service.open_workspace(ProjectSettings.globalize_path("res://"))
+	var open_state := {"ready": false, "error": false}
+	service.workspace_ready.connect(func(): open_state.ready = true)
+	service.workspace_error.connect(func(_message: String): open_state.error = true)
+	check(service.open_workspace(ProjectSettings.globalize_path("res://")) == OK, "workspace opening starts successfully")
+	check(not service.is_ready() and not open_state.ready, "workspace completion is asynchronous")
 	document = update("var latest: int = 4\n")
 	check(document.parse_script("res://fixture.gd")[""].members.has("latest"), "edits during indexing remain visible")
 	for iteration in range(500):
-		if service.is_ready() and not service.document_symbols("res://fixture.gd").is_empty():
+		if service.is_document_ready("res://fixture.gd"):
 			break
 		await create_timer(0.01).timeout
 	var symbols: Array = service.document_symbols("res://fixture.gd")
+	check(open_state.ready and not open_state.error and service.is_ready(), "workspace success signal marks readiness")
+	check(service.is_document_ready("res://fixture.gd"), "latest semantic revision becomes ready")
 	check(str(symbols).contains("latest"), "semantic workspace ingests latest pre-ready snapshot")
 	service.refresh_files(PackedStringArray(["res://fixture.gd"]))
 	await create_timer(0.05).timeout
@@ -83,31 +113,33 @@ func _run() -> void:
 	check(Service.utf16_column("😀éabc", 2) == 3, "character to UTF-16 conversion")
 
 	var failed: Object = ClassDB.instantiate(&"GDScriptLanguageService")
-	var failure_state := {"seen": false}
+	var failure_state := {"seen": false, "ready": false}
 	failed.workspace_error.connect(func(_message: String): failure_state.seen = true)
-	failed.open_workspace(ProjectSettings.globalize_path("res://"), {"native_api_path": "res://missing-api.json"})
+	failed.workspace_ready.connect(func(): failure_state.ready = true)
+	check(failed.open_workspace(ProjectSettings.globalize_path("res://"), {"native_api_path": "res://missing-api.json"}) == OK, "OK does not imply successful indexing")
 	failed.update_document("res://failed.gd", "var still_available = [1]\n", 1)
 	for attempt in range(200):
 		if failure_state.seen:
 			break
 		await create_timer(0.01).timeout
-	check(failure_state.seen and not failed.is_ready(), "indexing failure is reported")
+	check(failure_state.seen and not failure_state.ready and not failed.is_ready(), "indexing failure is reported without a success signal")
 	check(failed.document("res://failed.gd").parse_script("res://failed.gd")[""].members.has("still_available"), "syntax survives indexing failure")
 	failed = null
 
-	var editor := Node.new()
-	editor.name = "EditorNode"
-	root.add_child(editor)
 	var first: Node = Service.get_instance()
 	check(first == Service.get_instance(), "singleton lookup shares one service")
-	check(first.get_path() == NodePath("/root/EditorNode/EditorSingletons/GDScriptLSPService"), "singleton conventional location")
+	check(first.get_path() == NodePath("/root/GDScriptLSPService"), "runtime singleton attaches directly to root")
 	var edit := CodeEdit.new()
-	editor.add_child(edit)
-	edit.text = source
+	root.add_child(edit)
 	var a := Manager.new()
 	var b := Manager.new()
+	check_unattached(a, "new manager")
 	a.attach(edit, "res://shared.gd")
 	b.attach(edit, "res://shared.gd")
+	check(a.is_attached() and b.is_attached(), "empty buffers attach before semantic indexing")
+	check(not first.native.is_ready(), "attachment does not wait for workspace opening")
+	check(a.get_parse_revision() >= 0 and a.parse().has(""), "empty file has a real document")
+	edit.text = source
 	check(a.parser == b.parser, "consumers share one native document")
 	var shared_revision := a.get_parse_revision()
 	a.parse()
@@ -119,6 +151,8 @@ func _run() -> void:
 	a.parser.set_bracket_mode(true)
 	var live: Dictionary = a.parser.get_brackets()
 	a.detach()
+	check_unattached(a, "detached manager")
+	check(b.is_attached(), "other consumer remains attached")
 	check(not live.is_empty() and b.parser != null, "one detach preserves another consumer")
 	b.detach()
 	check(live.is_empty(), "last detach clears brackets")
@@ -126,8 +160,23 @@ func _run() -> void:
 	check(a.get_parse_revision() > shared_revision, "reattachment uses monotonic revisions")
 	a.set_script_path("")
 	check(a.get_uri().begins_with("untitled:"), "unnamed buffer has a session identity")
+	root.remove_child(edit)
+	check_unattached(a, "CodeEdit removed from tree")
+	root.add_child(edit)
+	a.attach(edit, "")
+	check(a.is_attached(), "same buffer can reattach after tree exit")
+	edit.free()
+	check_unattached(a, "freed CodeEdit")
+	edit = CodeEdit.new()
+	root.add_child(edit)
+	a.attach(edit, "res://service-lifecycle.gd")
+	first.free()
+	check_unattached(a, "freed service")
+	a.attach(edit, "res://service-lifecycle.gd")
+	check(a.is_attached(), "same buffer can reattach to a replacement service")
 	a.detach()
-	editor.free()
+	edit.free()
+	Service.get_instance().free()
 	service = null
 	if failures == 0:
 		print("PASS: native structure, brackets, indexing, shared ownership and Unicode")

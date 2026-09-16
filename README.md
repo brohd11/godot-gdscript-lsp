@@ -10,10 +10,15 @@ installed; their GDScript paths remain available without it.
 ## Ownership
 
 `service.gd` extends `Node` directly. `get_instance()` finds or creates
-`EditorNode/EditorSingletons/GDScriptLSPService` on the main thread.
+`EditorNode/EditorSingletons/GDScriptLSPService` in the editor, or
+`/root/GDScriptLSPService` at runtime, on the main thread.
 `code_edit_manager.gd` exposes `GDScriptLSPCodeEditManager`: attach a CodeEdit and
 script path, then call `parse()`, `sparse_parse()`, or inspect `parser.get_brackets()`.
 Managers share one document per attached source. Detach managers when finished.
+Use `is_attached()` to distinguish a live attachment (including an empty file)
+from an unavailable backend or a detached/discarded buffer. It does not synchronize
+the buffer or wait for semantic indexing. It becomes false when the CodeEdit
+leaves the tree or the service is freed; call `attach()` again to reattach.
 Full dictionaries may be modified; sparse and live bracket dictionaries are
 shared, read-only views. `get_parse_revision()` is monotonic across attachments.
 
@@ -21,12 +26,36 @@ Structural reads work before semantic indexing finishes. Native semantic reads
 are nonblocking and fall through while a revision is pending. Existing semantic
 API columns are UTF-16; use `GDScriptLSPService.utf16_column()` for CodeEdit columns.
 Compatibility structural projections retain tree-sitter-gd's byte-column fields
-(including lambdas); brackets use character columns. AddonLib owns its parser
+(including lambdas); brackets use character columns. Lambda entries expose
+`line_index`, `column_index`, `end_line`, and `end_column`, with nested closures
+under `lambdas`. These positions are zero-based, columns count UTF-8 bytes, and
+end positions are exclusive. These field names, nesting, and units are a
+compatibility contract. AddonLib owns its parser
 objects, type paths, and conversion of those projections into its public API.
 
 The native `GDScriptLanguageService` also supports direct use without an editor:
-`update_document(uri, text, revision)` followed by `document(uri)` exposes syntax
-without requiring `open_workspace()`. Revisions must increase for each source.
+`update_document(uri, text, revision)` synchronously makes syntax available through
+`document(uri).parse_script(uri)` and `document(uri).sparse_parse()`, without
+requiring `open_workspace()` or either readiness check. Revisions must increase
+for each source.
+
+`open_workspace()` starts asynchronous indexing. Returning `OK` means the work
+was started, not that indexing finished or succeeded. `is_ready()` becomes true
+when successful opening is delivered on the main loop via `workspace_ready`;
+failure emits `workspace_error` and leaves it false. Connect both signals before
+opening, and allow the main loop to run:
+
+```gdscript
+var service = ClassDB.instantiate(&"GDScriptLanguageService")
+service.workspace_ready.connect(func(): print("Workspace opened"))
+service.workspace_error.connect(func(message: String): push_error(message))
+service.open_workspace("res://")
+```
+
+`is_document_ready(uri)` checks whether semantic queries can use the current
+document revision. It can be false during pending updates or lock contention,
+even after `workspace_ready`. Structural reads deliberately do not require it;
+for semantic reads, retry on a later frame or after `index_updated`.
 
 ## Build
 

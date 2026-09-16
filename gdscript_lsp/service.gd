@@ -2,7 +2,7 @@
 class_name GDScriptLSPService
 extends Node
 
-## One editor-owned service. This script has no AddonLib dependencies.
+## One shared service per scene tree. This script has no AddonLib dependencies.
 const SCRIPT_PATH := "res://addons/addon_lib/gdscript_lsp/service.gd"
 var native: Object
 var _buffers: Dictionary = {}
@@ -17,18 +17,20 @@ static func get_instance() -> Node:
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree == null:
 		return null
-	var editor: Node
-	for child in tree.root.get_children():
-		if child.get_class() == "EditorNode" or child.name == &"EditorNode":
-			editor = child
-			break
-	if editor == null:
-		return null
-	var parent := editor.get_node_or_null("EditorSingletons")
-	if parent == null:
-		parent = Node.new()
-		parent.name = &"EditorSingletons"
-		editor.add_child(parent)
+	var parent: Node = tree.root
+	if Engine.is_editor_hint():
+		var editor: Node
+		for child in tree.root.get_children():
+			if child.get_class() == "EditorNode" or child.name == &"EditorNode":
+				editor = child
+				break
+		if editor == null:
+			return null
+		parent = editor.get_node_or_null("EditorSingletons")
+		if parent == null:
+			parent = Node.new()
+			parent.name = &"EditorSingletons"
+			editor.add_child(parent)
 	var service := parent.get_node_or_null("GDScriptLSPService")
 	if service == null:
 		service = load(SCRIPT_PATH).new()

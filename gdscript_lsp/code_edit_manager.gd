@@ -10,10 +10,16 @@ var _key := ""
 var _seen_revision := -1
 var parser: Object:
 	get:
-		return _service.get_document(_key) if is_instance_valid(_service) else null
+		return _service.get_document(_key) if is_attached() else null
+
+## A live structural document is attached, even if empty or still indexing.
+## This check does not synchronize the buffer or require semantic readiness.
+func is_attached() -> bool:
+	return is_instance_valid(_service) and is_instance_valid(_edit) \
+		and not _key.is_empty() and is_instance_valid(_service.get_document(_key))
 
 func attach(edit: CodeEdit, script_path := "") -> void:
-	if _edit == edit and _script_path == script_path and not _key.is_empty():
+	if _edit == edit and _script_path == script_path and is_attached():
 		return
 	detach()
 	_service = Service.get_instance()
@@ -40,12 +46,12 @@ func set_script_path(script_path: String) -> void:
 		attach(_edit, script_path)
 
 func cache_valid() -> bool:
-	if not is_instance_valid(_service) or _key.is_empty():
+	if not is_attached():
 		return false
 	return _service.sync_buffer(_key) == _seen_revision
 
 func parse_text(force := false) -> bool:
-	if not is_instance_valid(_service) or _key.is_empty():
+	if not is_attached():
 		return false
 	var revision: int = _service.sync_buffer(_key, force)
 	var changed := revision != _seen_revision
@@ -53,10 +59,10 @@ func parse_text(force := false) -> bool:
 	return changed
 
 func get_parse_revision() -> int:
-	return _service.sync_buffer(_key) if is_instance_valid(_service) else -1
+	return _service.sync_buffer(_key) if is_attached() else -1
 
 func get_uri() -> String:
-	return _service.get_uri(_key) if is_instance_valid(_service) else ""
+	return _service.get_uri(_key) if is_attached() else ""
 
 func parse() -> Dictionary:
 	parse_text()

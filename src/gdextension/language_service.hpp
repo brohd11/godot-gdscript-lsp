@@ -24,8 +24,12 @@ public:
 	GDScriptLanguageService();
 	~GDScriptLanguageService() override;
 
+	// Starts asynchronous indexing; completion emits workspace_ready or workspace_error.
 	godot::Error open_workspace(const godot::String &project_root, const godot::Dictionary &options = {});
+	// Workspace opening succeeded; subsequent document updates may still be pending.
 	bool is_ready() const;
+	// Semantic reads can use this revision now; may be false during work/lock contention.
+	// Structural document reads do not require either readiness check or a workspace.
 	bool is_document_ready(const godot::String &uri) const;
 	void update_document(const godot::String &uri, const godot::String &text, int64_t version);
 	godot::Ref<godot::GDScriptLSPDocument> document(const godot::String &uri) const;

@@ -41,12 +41,9 @@ if args.legacy_addon:
 (project / 'project.godot').write_text('[application]\nconfig/name="Language service tests"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n')
 (project / 'fixture.gd').write_text('extends RefCounted\nvar saved: int = 1\n')
 env = os.environ.copy()
-for command in [
-    [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--editor', '--quit-after', '60'],
-    [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/native.gd'],
-    *([[args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/semantic.gd']] if fixtures.is_dir() else []),
-    [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/benchmark.gd'],
-]:
+
+
+def run(command):
     print('Running:', shlex.join(command), flush=True)
     result = subprocess.run(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
     print(result.stdout, flush=True)
@@ -56,3 +53,24 @@ for command in [
         print('Godot failed:', reason, flush=True)
     if result.returncode or 'SCRIPT ERROR' in result.stdout or 'FAIL:' in result.stdout:
         raise SystemExit(1)
+
+
+for command in [
+    [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--editor', '--quit-after', '60'],
+    [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/native.gd'],
+    *([[args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/semantic.gd']] if fixtures.is_dir() else []),
+    [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/benchmark.gd'],
+]:
+    run(command)
+
+# Stage only wrapper scripts so this check cannot accidentally load a native backend.
+with tempfile.TemporaryDirectory(prefix='test-no-extension-', dir=repo / 'build') as temporary:
+    absent_project = Path(temporary)
+    absent_addon = absent_project / 'addons/addon_lib/gdscript_lsp'
+    absent_addon.mkdir(parents=True)
+    for script in ('service.gd', 'code_edit_manager.gd'):
+        shutil.copy2(addon / script, absent_addon / script)
+    shutil.copy2(repo / 'tests/manager_unavailable.gd', absent_project / 'test.gd')
+    shutil.copy2(project / 'project.godot', absent_project / 'project.godot')
+    run([args.godot, '--headless', '--log-file', str(absent_project / 'godot.log'),
+         '--path', str(absent_project), '--script', 'res://test.gd'])
