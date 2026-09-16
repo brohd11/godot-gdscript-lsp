@@ -12,9 +12,11 @@ void GDScriptLSPDocument::_bind_methods() {
     ClassDB::bind_method(D_METHOD("clear_brackets"), &GDScriptLSPDocument::clear_brackets);
 }
 
-void GDScriptLSPDocument::set_snapshot(std::shared_ptr<const gdscript_lsp::Document> snapshot) {
+void GDScriptLSPDocument::set_snapshot(std::shared_ptr<const gdscript_lsp::Document> snapshot,
+        std::optional<int64_t> revision) {
     const bool incremental = _snapshot && snapshot->edit().has_value();
     _snapshot = std::move(snapshot);
+    _revision = revision.value_or(_snapshot->version());
     _tree = _snapshot->concrete_tree();
     _src_len = static_cast<uint32_t>(_snapshot->source().size());
     _full_revision = _sparse_revision = -1;

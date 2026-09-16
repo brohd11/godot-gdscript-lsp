@@ -13,6 +13,9 @@ func _initialize() -> void:
 
 func _run() -> void:
 	check(not ClassDB.class_exists(&"GDScriptLanguageService"), "extension is absent")
+	var service = load("res://addons/addon_lib/gdscript_lsp/service.gd").new()
+	check(service.get_disk_document("res://empty.gd", "var value: int\n") == null, "missing backend declines read-only structure")
+	service.free()
 	var edit := CodeEdit.new()
 	root.add_child(edit)
 	var manager := Manager.new()

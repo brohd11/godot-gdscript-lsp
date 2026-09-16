@@ -98,6 +98,19 @@ func get_document(key: String) -> Object:
 		return null
 	return native.document(_buffers[key].uri)
 
+## Read-only structural view of a script as the workspace indexed it, for callers that only want to
+## READ another file. Unlike acquire(), this registers no buffer, pushes no document version and
+## invalidates nothing - so it cannot disturb the semantic index of scripts that depend on it.
+## Returns null when the extension predates document_for_path, so callers must handle a null.
+## `text` is only a fallback for files the workspace has not indexed yet (open_workspace is async);
+## when it has, the indexed copy wins and the text is ignored.
+func get_disk_document(script_path: String, text := "") -> Object:
+	if not is_instance_valid(native) or script_path.is_empty() or script_path.contains("::"):
+		return null
+	if not native.has_method(&"document_for_path"):
+		return null
+	return native.document_for_path(script_path, text)
+
 func get_uri(key: String) -> String:
 	return _buffers.get(key, {}).get("uri", "")
 

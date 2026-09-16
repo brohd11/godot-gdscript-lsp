@@ -33,6 +33,9 @@ public:
 	bool is_document_ready(const godot::String &uri) const;
 	void update_document(const godot::String &uri, const godot::String &text, int64_t version);
 	godot::Ref<godot::GDScriptLSPDocument> document(const godot::String &uri) const;
+	// Read-only structural view; never registers an editor buffer or queues indexing.
+	godot::Ref<godot::GDScriptLSPDocument> document_for_path(const godot::String &uri,
+		const godot::String &text = {}) const;
 	void close_document(const godot::String &uri);
 	void refresh_files(const godot::PackedStringArray &paths);
 	godot::Dictionary completion(const godot::String &uri, int line, int utf16_column) const;
@@ -59,6 +62,9 @@ private:
 	bool current(const godot::String &uri) const;
 	std::filesystem::path project_root_;
 	std::unordered_map<std::string, godot::Ref<godot::GDScriptLSPDocument>> documents_;
+	mutable std::unordered_map<std::string, godot::Ref<godot::GDScriptLSPDocument>> readonly_documents_;
+	// Distinct from editor versions and the -1 cache sentinel; survives workspace reopen.
+	mutable int64_t readonly_revision_ = -2;
 	mutable std::mutex semantic_mutex_;
 	mutable std::mutex queue_mutex_;
 	std::condition_variable_any queue_changed_;

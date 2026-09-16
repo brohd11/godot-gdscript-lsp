@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Run in the integration project containing AddonLib and SyntaxPlus.
-const Parser = preload("res://addons/addon_lib/brohd/alib_runtime/utils/gdscript/parser/gdscript_parser.gd")
+const Parser = preload("res://addons/addon_lib/gdscript_parser/gdscript_parser.gd")
 var failures := 0
 
 func check(value: bool, message: String) -> void:

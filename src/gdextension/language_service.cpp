@@ -175,9 +175,9 @@ std::string GDScriptLanguageService::target_uri(const String &uri) const {
 
 bool GDScriptLanguageService::current(const String &uri) const {
 	if (!ready_ || semantic_busy_) return false;
-	std::lock_guard queue_lock(queue_mutex_);
-	if (configuration_pending_ || pending_.contains(target_uri(uri)) || closes_.contains(target_uri(uri))) return false;
 	auto target = target_uri(uri);
+	std::lock_guard queue_lock(queue_mutex_);
+	if (configuration_pending_ || pending_.contains(target) || closes_.contains(target) || refreshes_.contains(target)) return false;
 	auto found = documents_.find(target);
 	return found == documents_.end() || workspace_->document_version(target) == found->second->get_revision();
 }
@@ -190,6 +190,34 @@ bool GDScriptLanguageService::is_document_ready(const String &uri) const {
 Ref<GDScriptLSPDocument> GDScriptLanguageService::document(const String &uri) const {
 	auto found = documents_.find(target_uri(uri));
 	return found == documents_.end() ? Ref<GDScriptLSPDocument>() : found->second;
+}
+
+Ref<GDScriptLSPDocument> GDScriptLanguageService::document_for_path(const String &uri,
+		const String &text) const {
+	auto target = target_uri(uri);
+	// Open editor buffers carry unsaved text and always take precedence.
+	if (auto open = documents_.find(target); open != documents_.end()) return open->second;
+
+	auto snapshot = workspace_->document_snapshot(target);
+	if (!snapshot && text.is_empty()) return Ref<GDScriptLSPDocument>();
+	auto &entry = readonly_documents_[target];
+	if (entry.is_null()) entry.instantiate();
+	if (snapshot) {
+		// Disk snapshots reuse version -1. Identity, not the document version, detects a refresh.
+		if (entry->snapshot() != snapshot)
+			entry->set_snapshot(std::move(snapshot), readonly_revision_--);
+	} else {
+		// While indexing, parse the caller's text without registering a buffer or queuing work.
+		auto source = to_std(text);
+		if (!entry->snapshot() || entry->snapshot()->source() != source) {
+			auto path = to_std(uri);
+			if (auto file = path_for_file_uri(target))
+				path = "res://" + file->lexically_relative(project_root_).generic_string();
+			entry->set_snapshot(std::make_shared<Document>(target, path, std::move(source), -1,
+				Document::Analysis::Deferred), readonly_revision_--);
+		}
+	}
+	return entry;
 }
 
 GDScriptLanguageService::~GDScriptLanguageService() {
@@ -222,6 +250,8 @@ void GDScriptLanguageService::_bind_methods() {
 		&GDScriptLanguageService::definition);
 	ClassDB::bind_method(D_METHOD("document_symbols", "uri"), &GDScriptLanguageService::document_symbols);
 	ClassDB::bind_method(D_METHOD("diagnostics", "uri"), &GDScriptLanguageService::diagnostics);
+	ClassDB::bind_method(D_METHOD("document_for_path", "uri", "text"),
+		&GDScriptLanguageService::document_for_path, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("resolve_type", "uri", "line", "utf16_column", "expression"),
 		&GDScriptLanguageService::resolve_type, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("resolve_expression", "uri", "line", "utf16_column", "expression"),
@@ -240,6 +270,7 @@ Error GDScriptLanguageService::open_workspace(const String &project_root, const 
 		queue_changed_.notify_all();
 		index_thread_.join();
 	}
+	readonly_documents_.clear();
 	ready_ = false;
 	semantic_busy_ = false;
 	++generation_;

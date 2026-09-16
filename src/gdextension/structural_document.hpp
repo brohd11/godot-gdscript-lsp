@@ -1,5 +1,6 @@
 #pragma once
 #include "core/document.hpp"
+#include <optional>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
@@ -8,9 +9,10 @@ namespace godot {
 class GDScriptLSPDocument : public RefCounted {
     GDCLASS(GDScriptLSPDocument, RefCounted)
 public:
-    void set_snapshot(std::shared_ptr<const gdscript_lsp::Document> snapshot);
+    void set_snapshot(std::shared_ptr<const gdscript_lsp::Document> snapshot,
+        std::optional<int64_t> revision = {});
     const auto &snapshot() const { return _snapshot; }
-    int64_t get_revision() const { return _snapshot ? _snapshot->version() : -1; }
+    int64_t get_revision() const { return _revision; }
     Dictionary parse_script(const String &script_path);
     Dictionary sparse_parse();
     void set_bracket_mode(bool enabled);
@@ -21,6 +23,7 @@ protected:
     static void _bind_methods();
 private:
     std::shared_ptr<const gdscript_lsp::Document> _snapshot;
+    int64_t _revision = -1;
     const TSTree *_tree = nullptr;
     uint32_t _src_len = 0;
     int64_t _full_revision = -1, _sparse_revision = -1;

@@ -58,6 +58,7 @@ def run(command):
 for command in [
     [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--editor', '--quit-after', '60'],
     [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/native.gd'],
+    [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/readonly.gd'],
     *([[args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/semantic.gd']] if fixtures.is_dir() else []),
     [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/benchmark.gd'],
 ]:
