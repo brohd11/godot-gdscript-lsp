@@ -1,0 +1,9 @@
+/build/
+/dist/
+/.sconsign.dblite
+/gdscript_lsp/bin/
+/gdscript_lsp/data/
+*.os
+__pycache__/
+.godot/
+/.core-path

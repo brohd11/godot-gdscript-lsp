@@ -1,0 +1,209 @@
+#include "structural_document.hpp"
+#include <godot_cpp/variant/array.hpp>
+
+namespace godot {
+void GDScriptLSPDocument::set_bracket_mode(bool p_enabled) {
+    if (p_enabled == _bracket_mode) return;
+    _bracket_mode = p_enabled;
+    if (!_bracket_mode) {
+        clear_brackets();
+        return;
+    }
+    if (_tree) {
+        _rebuild_line_starts();
+        _brackets_full_scan();
+    }
+}
+
+void GDScriptLSPDocument::clear_brackets() {
+    _bracket_lines.clear();
+    _line_starts.clear();
+    _brackets_dict.clear();
+}
+
+bool GDScriptLSPDocument::get_bracket_mode() const {
+    return _bracket_mode;
+}
+
+Dictionary GDScriptLSPDocument::get_brackets() const {
+    if (!_tree || !_bracket_mode) return Dictionary();
+    return _brackets_dict;
+}
+
+void GDScriptLSPDocument::_rebuild_line_starts() {
+    _line_starts.clear();
+    _line_starts.push_back(0);
+    const char *src = _snapshot->source().data();
+    for (uint32_t b = 0; b < _src_len; b++)
+        if (src[b] == '\n') _line_starts.push_back(b + 1);
+}
+
+// Cursor walk over `scope` collecting ()[]{} tokens on rows [from_row, to_row]
+// into _bracket_lines, with running depth starting at start_depth. String and
+// comment contents are not tokens, so only real brackets are seen. Depth is
+// raw (not clamped at 0) so per-line end_depth stays exact for incremental
+// splices. Rows outside the range are ignored entirely — start_depth already
+// subsumes everything above from_row.
+void GDScriptLSPDocument::_scan_brackets(TSNode scope, int32_t start_depth,
+                                        uint32_t from_row, uint32_t to_row) {
+    const char *src = _snapshot->source().data();
+    int32_t depth = start_depth;
+    uint32_t last_row = from_row;
+
+    TSTreeCursor cursor = ts_tree_cursor_new(scope);
+    bool descending = true;
+    while (true) {
+        if (descending) {
+            TSNode node = ts_tree_cursor_current_node(&cursor);
+            if (!ts_node_is_named(node)) {
+                const char *t = ts_node_type(node);
+                if (t[0] != '\0' && t[1] == '\0') { // single-char anonymous token
+                    bool opener = t[0] == '(' || t[0] == '[' || t[0] == '{';
+                    bool closer = t[0] == ')' || t[0] == ']' || t[0] == '}';
+                    if (opener || closer) {
+                        uint32_t row = ts_node_start_point(node).row;
+                        if (row >= from_row && row <= to_row) {
+                            // Depth before this token = end depth of every row
+                            // since the last bracket seen (from_row included:
+                            // depth still equals start_depth there).
+                            if (row > last_row) {
+                                for (uint32_t r = last_row; r < row; r++)
+                                    _bracket_lines[r].end_depth = depth;
+                                last_row = row;
+                            }
+
+                            if (closer) depth--;
+
+                            // Character column: count UTF-8 lead bytes from line start.
+                            uint32_t byte = ts_node_start_byte(node);
+                            int32_t col = 0;
+                            for (uint32_t b = _line_starts[row]; b < byte; b++)
+                                if ((src[b] & 0xC0) != 0x80) col++;
+                            _bracket_lines[row].entries.push_back({ col, depth });
+
+                            if (opener) depth++;
+                        }
+                    }
+                }
+            }
+        }
+        if (descending && ts_tree_cursor_goto_first_child(&cursor)) continue;
+        descending = false;
+        if (ts_tree_cursor_goto_next_sibling(&cursor)) { descending = true; continue; }
+        if (!ts_tree_cursor_goto_parent(&cursor)) break;
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    for (uint32_t r = last_row; r <= to_row; r++)
+        _bracket_lines[r].end_depth = depth;
+}
+
+void GDScriptLSPDocument::_brackets_full_scan() {
+    _bracket_lines.assign(_line_starts.size(), BracketLine{});
+    if (!_tree || _line_starts.empty()) return;
+    _scan_brackets(ts_tree_root_node(_tree), 0, 0, (uint32_t)_line_starts.size() - 1);
+
+    _brackets_dict.clear(); // clear+refill: the public dict stays the same object
+    for (size_t row = 0; row < _bracket_lines.size(); row++) {
+        const BracketLine &bl = _bracket_lines[row];
+        if (bl.entries.empty()) continue;
+        Dictionary line_map;
+        for (const auto &e : bl.entries) line_map[e.first] = e.second;
+        _brackets_dict[(int64_t)row] = line_map;
+    }
+}
+
+void GDScriptLSPDocument::_brackets_after_edit(uint32_t start_row, uint32_t old_end_row,
+                                              uint32_t new_end_row,
+                                              const TSRange *ranges, uint32_t range_count,
+                                              const TSTree *p_new_tree) {
+    if (_bracket_lines.empty()) { _brackets_full_scan(); return; }
+
+    // Rows to re-scan, in new coordinates: the byte-diff region plus any
+    // changed range (structural fall-out beyond the text edit).
+    uint32_t r0 = start_row;
+    uint32_t r1 = new_end_row;
+    for (uint32_t i = 0; i < range_count; i++) {
+        if (ranges[i].start_point.row < r0) r0 = ranges[i].start_point.row;
+        if (ranges[i].end_point.row   > r1) r1 = ranges[i].end_point.row;
+    }
+    int32_t row_delta = (int32_t)new_end_row - (int32_t)old_end_row;
+    uint32_t old_r1 = (uint32_t)((int32_t)r1 - row_delta); // propagation doesn't move rows
+
+    if (r0 >= _line_starts.size() || r1 >= _line_starts.size() ||
+        r0 >= _bracket_lines.size() || old_r1 >= _bracket_lines.size() || old_r1 < r0) {
+        _brackets_full_scan();
+        return;
+    }
+    int32_t start_depth   = r0 > 0 ? _bracket_lines[r0 - 1].end_depth : 0;
+    int32_t old_end_depth = _bracket_lines[old_r1].end_depth;
+
+    _bracket_lines.erase(_bracket_lines.begin() + r0, _bracket_lines.begin() + old_r1 + 1);
+    _bracket_lines.insert(_bracket_lines.begin() + r0, r1 - r0 + 1, BracketLine{});
+
+    uint32_t from_byte = _line_starts[r0];
+    uint32_t to_byte   = (r1 + 1 < _line_starts.size()) ? _line_starts[r1 + 1] : _src_len;
+    if (to_byte > from_byte) {
+        TSNode scope = ts_node_descendant_for_byte_range(ts_tree_root_node(p_new_tree),
+                                                         from_byte, to_byte);
+        _scan_brackets(scope, start_depth, r0, r1);
+    } else {
+        for (uint32_t r = r0; r <= r1; r++) _bracket_lines[r].end_depth = start_depth;
+    }
+
+    // If the rescan changed the depth at the end of the region, shift every
+    // bracket below by the same delta (raw depths make this exact).
+    int32_t delta = _bracket_lines[r1].end_depth - old_end_depth;
+    if (delta != 0) {
+        for (size_t r = r1 + 1; r < _bracket_lines.size(); r++) {
+            for (auto &e : _bracket_lines[r].entries) e.second += delta;
+            _bracket_lines[r].end_depth += delta;
+        }
+    }
+
+    // Sync the public Dictionary in place (it stays the same object).
+    // Order matters: the dict is still in OLD coordinates here, so erase the
+    // spliced-out old rows first, then shift the rows below, then insert the
+    // rescanned rows in new coordinates.
+    for (uint32_t r = r0; r <= old_r1; r++)
+        _brackets_dict.erase((int64_t)r);
+    if (row_delta != 0) {
+        // Re-key rows below the spliced region (keys > old_r1 shift by row_delta).
+        Array keys = _brackets_dict.keys();
+        Array moved_keys, moved_vals;
+        for (int i = 0; i < keys.size(); i++) {
+            int64_t row = keys[i];
+            if (row > (int64_t)old_r1) {
+                moved_vals.push_back(_brackets_dict[keys[i]]);
+                _brackets_dict.erase(keys[i]);
+                moved_keys.push_back(row + row_delta);
+            }
+        }
+        for (int i = 0; i < moved_keys.size(); i++)
+            _brackets_dict[moved_keys[i]] = moved_vals[i];
+    }
+    // Insert the rescanned rows (new coordinates).
+    for (uint32_t r = r0; r <= r1; r++) {
+        const BracketLine &bl = _bracket_lines[r];
+        if (!bl.entries.empty()) {
+            Dictionary line_map;
+            for (const auto &e : bl.entries) line_map[e.first] = e.second;
+            _brackets_dict[(int64_t)r] = line_map;
+        }
+    }
+    // Apply the depth shift to the rows below (nested dicts are shared refs).
+    if (delta != 0) {
+        Array keys = _brackets_dict.keys();
+        for (int i = 0; i < keys.size(); i++) {
+            int64_t row = keys[i];
+            if (row > (int64_t)r1) {
+                Dictionary line_map = _brackets_dict[keys[i]];
+                Array cols = line_map.keys();
+                for (int j = 0; j < cols.size(); j++)
+                    line_map[cols[j]] = (int64_t)line_map[cols[j]] + delta;
+            }
+        }
+    }
+}
+
+} // namespace godot

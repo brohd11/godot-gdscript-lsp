@@ -1,0 +1,6 @@
+[submodule "core"]
+	path = core
+	url = https://github.com/brohd11/gdscript-standalone-lsp.git
+[submodule "godot-cpp"]
+	path = godot-cpp
+	url = https://github.com/godotengine/godot-cpp.git

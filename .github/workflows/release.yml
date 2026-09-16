@@ -1,0 +1,89 @@
+name: Build addon
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux
+            args: arch=x86_64
+          - runner: windows-2022
+            platform: windows
+            args: arch=x86_64
+          - runner: macos-15
+            platform: macos
+            args: arch=universal macos_deployment_target=14.0
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Select macOS toolchain
+        if: runner.os == 'macOS'
+        run: |
+          test -d /Applications/Xcode_26.3.app/Contents/Developer
+          echo 'DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer' >> "$GITHUB_ENV"
+      - name: Prepare
+        run: |
+          pip install scons==4.8.1
+          python tools/prepare.py
+      - name: Build
+        run: |
+          scons -j3 platform=${{ matrix.platform }} ${{ matrix.args }} target=template_debug
+          scons -j3 platform=${{ matrix.platform }} ${{ matrix.args }} target=template_release
+      - name: Install test engine
+        run: python tools/fetch_test_godot.py
+      - name: Test
+        run: |
+          engine="$PWD/build/godot/Godot"
+          if [[ "$RUNNER_OS" == Windows ]]; then engine="$engine.exe"; fi
+          python tests/run.py --godot "$engine"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.platform }}
+          path: gdscript_lsp/bin/
+          if-no-files-found: error
+  package:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: gdscript_lsp/bin
+          merge-multiple: true
+      - name: Package
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: python package.py --version "${RELEASE_VERSION//\//-}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: addon-package
+          path: dist/*
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes
