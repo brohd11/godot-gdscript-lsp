@@ -19,6 +19,7 @@ with tempfile.TemporaryDirectory(prefix='addon-integration-', dir=repo / 'build'
     (project / 'project.godot').write_text('[application]\nconfig/name="Native-absent integration"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n')
     shutil.copy2(repo / 'tests/addon_integration.gd', project / 'test.gd')
     shutil.copy2(repo / 'tests/scratch_reader.gd', project / 'scratch_reader.gd')
+    shutil.copy2(repo / 'tests/highlighter_integration.gd', project / 'highlighter_integration.gd')
     def run(extra):
         result = subprocess.run([args.godot, '--headless', '--path', str(project), '--log-file', str(project / 'godot.log'), *extra],
             text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
@@ -32,6 +33,7 @@ with tempfile.TemporaryDirectory(prefix='addon-integration-', dir=repo / 'build'
     base_config = (project / 'project.godot').read_text()
     run(['--editor', '--import', '--quit'])
     run(['--script', 'res://test.gd'])
+    run(['--editor', '--script', 'res://highlighter_integration.gd'])
     probe = project / 'addons/migration_probe'
     probe.mkdir()
     shutil.copy2(repo / 'tests/editor_probe.gd', probe / 'plugin.gd')
@@ -44,5 +46,6 @@ with tempfile.TemporaryDirectory(prefix='addon-integration-', dir=repo / 'build'
     run(['--editor', '--quit-after', '60'])
     run(['--script', 'res://test.gd'])
     run(['--script', 'res://scratch_reader.gd'])
+    run(['--editor', '--script', 'res://highlighter_integration.gd'])
     (project / 'project.godot').write_text(editor_config)
     assert 'PASS: editor consumer initialization' in run(['--editor', '--quit-after', '600'])

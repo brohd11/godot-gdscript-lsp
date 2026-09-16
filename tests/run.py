@@ -28,7 +28,8 @@ if args.archive:
         archive.extractall(project)
 else:
     shutil.copytree(repo / 'gdscript_lsp', addon, dirs_exist_ok=True)
-shutil.copytree(repo / 'tests', project / 'tests', dirs_exist_ok=True, ignore=shutil.ignore_patterns('addon_integration.gd'))
+shutil.copytree(repo / 'tests', project / 'tests', dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns('addon_integration.gd', 'highlighter_integration.gd'))
 fixtures = args.core.resolve() / 'tests/fixtures/basic'
 if fixtures.is_dir():
     shutil.copytree(fixtures, project / 'tests/fixtures/basic', dirs_exist_ok=True)
