@@ -3,6 +3,7 @@
 from pathlib import Path
 import platform
 import shutil
+import subprocess
 import urllib.request
 import zipfile
 
@@ -16,7 +17,11 @@ urllib.request.urlretrieve('https://github.com/godotengine/godot/releases/downlo
 with zipfile.ZipFile(archive) as z:
     z.extractall(root)
 source = root / ('Godot.app/Contents/MacOS/Godot' if system == 'Darwin' else name[:-4])
-target = root / ('Godot.exe' if system == 'Windows' else 'Godot')
+# Keep the signed macOS executable inside its app bundle. Copying only the
+# Mach-O out of Godot.app can make macOS kill it before it produces any output.
+target = source if system == 'Darwin' else root / ('Godot.exe' if system == 'Windows' else 'Godot')
 if source != target:
     shutil.copy2(source, target)
 target.chmod(0o755)
+print('Test engine:', target, flush=True)
+subprocess.run([str(target), '--headless', '--version'], check=True)

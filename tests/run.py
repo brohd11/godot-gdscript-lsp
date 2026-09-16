@@ -4,6 +4,8 @@ import argparse
 import os
 from pathlib import Path
 import shutil
+import shlex
+import signal
 import subprocess
 import tempfile
 import zipfile
@@ -45,7 +47,12 @@ for command in [
     *([[args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/semantic.gd']] if fixtures.is_dir() else []),
     [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/benchmark.gd'],
 ]:
+    print('Running:', shlex.join(command), flush=True)
     result = subprocess.run(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
-    print(result.stdout)
+    print(result.stdout, flush=True)
+    if result.returncode:
+        reason = (signal.Signals(-result.returncode).name if result.returncode < 0
+                  else 'exit code %s' % result.returncode)
+        print('Godot failed:', reason, flush=True)
     if result.returncode or 'SCRIPT ERROR' in result.stdout or 'FAIL:' in result.stdout:
-        raise SystemExit(result.returncode or 1)
+        raise SystemExit(1)

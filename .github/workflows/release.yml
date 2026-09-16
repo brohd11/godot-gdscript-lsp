@@ -56,6 +56,7 @@ jobs:
       - name: Test
         run: |
           engine="$PWD/build/godot/Godot"
+          if [[ "$RUNNER_OS" == macOS ]]; then engine="$PWD/build/godot/Godot.app/Contents/MacOS/Godot"; fi
           if [[ "$RUNNER_OS" == Windows ]]; then engine="$engine.exe"; fi
           python tests/run.py --godot "$engine"
       - uses: actions/upload-artifact@v7
