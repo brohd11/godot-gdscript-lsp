@@ -30,6 +30,10 @@ shutil.copytree(repo / 'tests', project / 'tests', dirs_exist_ok=True, ignore=sh
 fixtures = args.core.resolve() / 'tests/fixtures/basic'
 if fixtures.is_dir():
     shutil.copytree(fixtures, project / 'tests/fixtures/basic', dirs_exist_ok=True)
+    # Path.as_uri supplies the third slash before Windows drive letters and
+    # percent-encodes spaces, Unicode and literal percent signs on all hosts.
+    (project / 'tests/consumer_uri.txt').write_text(
+        (project / 'tests/fixtures/basic/consumer.gd').resolve().as_uri(), encoding='utf-8')
 if args.legacy_addon:
     shutil.copytree(args.legacy_addon, project / 'addons/addon_lib/tree_sitter_gd', dirs_exist_ok=True)
 (project / 'project.godot').write_text('[application]\nconfig/name="Language service tests"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n')

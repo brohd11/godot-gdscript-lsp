@@ -25,14 +25,18 @@ func _initialize() -> void:
 		quit(1)
 
 func _on_ready() -> void:
-	var uri := "file://" + ProjectSettings.globalize_path("res://tests/fixtures/basic/consumer.gd")
+	var uri := FileAccess.get_file_as_string("res://tests/consumer_uri.txt").strip_edges()
+	if not uri.begins_with("file:///"):
+		push_error("missing or invalid fixture URI; run this test with tests/run.py: %s" % uri)
+		quit(1)
+		return
 	await _wait_for(uri)
 	var initial_outline: Array = service.document_symbols(uri)
 	var child_outline: Dictionary = _find_outline(initial_outline, "child")
 	if child_outline.is_empty() or child_outline.resolvedType.name != "ChildThing" \
 			or child_outline.origin == null or child_outline.origin.name != "child" \
 			or not child_outline.flags.staticTyped or not child_outline.flags.inferred:
-		push_error("unexpected rich document symbol: %s" % [child_outline])
+		push_error("unexpected rich document symbol for %s: %s" % [uri, child_outline])
 		quit(1)
 		return
 	var completion: Dictionary = service.completion(uri, 6, 7)

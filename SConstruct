@@ -7,7 +7,13 @@ deps = os.path.join(core, '.deps')
 godot_cpp = Dir(ARGUMENTS.pop('godot_cpp', 'godot-cpp')).abspath
 ARGUMENTS.setdefault('build_profile', 'build_profile.json')
 ARGUMENTS.setdefault('macos_deployment_target', '14.0')
-env = SConscript(os.path.join(godot_cpp, 'SConstruct'), {'api_version': '4.6'})
+# SCons filters the subprocess environment. Preserve the selected Xcode for
+# both godot-cpp and our sources; otherwise /usr/bin/clang uses xcode-select's
+# default toolchain even when CI exports a newer DEVELOPER_DIR.
+env = Environment(tools=['default'], PLATFORM='')
+if 'DEVELOPER_DIR' in os.environ:
+    env['ENV']['DEVELOPER_DIR'] = os.environ['DEVELOPER_DIR']
+env = SConscript(os.path.join(godot_cpp, 'SConstruct'), {'env': env, 'api_version': '4.6'})
 suffix = env['suffix']
 if env['platform'] == 'macos':
     suffix = suffix.replace('.universal', '').replace('.arm64', '').replace('.x86_64', '')
