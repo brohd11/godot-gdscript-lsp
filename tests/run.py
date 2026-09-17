@@ -37,6 +37,13 @@ if fixtures.is_dir():
     # percent-encodes spaces, Unicode and literal percent signs on all hosts.
     (project / 'tests/consumer_uri.txt').write_text(
         (project / 'tests/fixtures/basic/consumer.gd').resolve().as_uri(), encoding='utf-8')
+wide_fixture = args.core.resolve() / 'tests/fixtures/large_expressions/limits.gd.txt'
+if not wide_fixture.is_file():
+    raise SystemExit('Large-expression fixture missing; select the updated shared core with --core')
+wide_project = project / 'tests/fixtures/large_expressions'
+wide_project.mkdir(parents=True, exist_ok=True)
+shutil.copy2(wide_fixture, wide_project / 'limits.gd')
+(wide_project / 'project.godot').write_text('[application]\nconfig/name="Wide expressions"\n')
 if args.legacy_addon:
     shutil.copytree(args.legacy_addon, project / 'addons/addon_lib/tree_sitter_gd', dirs_exist_ok=True)
 (project / 'project.godot').write_text('[application]\nconfig/name="Language service tests"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n')
@@ -61,6 +68,7 @@ for command in [
     [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/native.gd'],
     [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/readonly.gd'],
     *([[args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/semantic.gd']] if fixtures.is_dir() else []),
+    [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/large_expressions.gd'],
     [args.godot, '--headless', '--log-file', str(project / 'godot.log'), '--path', str(project), '--script', 'res://tests/benchmark.gd'],
 ]:
     run(command)
