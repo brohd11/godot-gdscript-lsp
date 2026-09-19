@@ -4,6 +4,8 @@
 namespace godot {
 void GDScriptLSPDocument::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_revision"), &GDScriptLSPDocument::get_revision);
+    ClassDB::bind_method(D_METHOD("get_source_code"), &GDScriptLSPDocument::get_source_code);
+    ClassDB::bind_method(D_METHOD("get_source_hash"), &GDScriptLSPDocument::get_source_hash);
     ClassDB::bind_method(D_METHOD("parse_script", "script_path"), &GDScriptLSPDocument::parse_script);
     ClassDB::bind_method(D_METHOD("sparse_parse"), &GDScriptLSPDocument::sparse_parse);
     ClassDB::bind_method(D_METHOD("set_bracket_mode", "enabled"), &GDScriptLSPDocument::set_bracket_mode);
@@ -12,9 +14,21 @@ void GDScriptLSPDocument::_bind_methods() {
     ClassDB::bind_method(D_METHOD("clear_brackets"), &GDScriptLSPDocument::clear_brackets);
 }
 
+String GDScriptLSPDocument::get_source_code() const {
+    if (!_snapshot) return {};
+    const auto &source = _snapshot->source();
+    return String::utf8(source.data(), static_cast<int64_t>(source.size()));
+}
+
+String GDScriptLSPDocument::get_source_hash() {
+    if (_source_hash.is_empty()) _source_hash = get_source_code().sha256_text();
+    return _source_hash;
+}
+
 void GDScriptLSPDocument::set_snapshot(std::shared_ptr<const gdscript_lsp::Document> snapshot,
         std::optional<int64_t> revision) {
     const bool incremental = _snapshot && snapshot->edit().has_value();
+    _source_hash = String();
     _snapshot = std::move(snapshot);
     _revision = revision.value_or(_snapshot->version());
     _tree = _snapshot->concrete_tree();

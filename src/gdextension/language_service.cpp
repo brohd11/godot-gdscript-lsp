@@ -5,6 +5,8 @@
 #include <godot_cpp/core/class_db.hpp>
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 
 using namespace godot;
 
@@ -165,6 +167,36 @@ Dictionary completion_dict(const CompletionResult &completion) {
 
 } // namespace
 
+std::optional<GDScriptLanguageService::DiskStamp> GDScriptLanguageService::disk_stamp(const std::filesystem::path &path) {
+	std::error_code error;
+	DiskStamp stamp;
+	stamp.exists = std::filesystem::exists(path, error);
+	if (error) return {};
+	if (!stamp.exists) return stamp;
+	stamp.modified = std::filesystem::last_write_time(path, error);
+	if (error) return {};
+	stamp.size = std::filesystem::file_size(path, error);
+	if (error) return {};
+	return stamp;
+}
+
+GDScriptLanguageService::DiskStamps GDScriptLanguageService::scan_disk_stamps(const std::filesystem::path &root, std::stop_token stop) {
+	DiskStamps result;
+	std::error_code error;
+	for (std::filesystem::recursive_directory_iterator it(root, std::filesystem::directory_options::skip_permission_denied, error), end;
+			it != end && !stop.stop_requested(); it.increment(error)) {
+		if (error) { error.clear(); continue; }
+		const auto &path = it->path();
+		if (it->is_directory(error)) {
+			if (path.filename() == ".git" || std::filesystem::exists(path / ".gdignore", error)) it.disable_recursion_pending();
+			continue;
+		}
+		if (path.extension() != ".gd" && !path.string().ends_with(".gd.uid") && path != root / "project.godot") continue;
+		if (auto stamp = disk_stamp(path)) result[file_uri_for_path(path)] = *stamp;
+	}
+	return result;
+}
+
 GDScriptLanguageService::GDScriptLanguageService() : workspace_(std::make_unique<Workspace>()) {}
 
 std::string GDScriptLanguageService::target_uri(const String &uri) const {
@@ -193,30 +225,71 @@ Ref<GDScriptLSPDocument> GDScriptLanguageService::document(const String &uri) co
 }
 
 Ref<GDScriptLSPDocument> GDScriptLanguageService::document_for_path(const String &uri,
-		const String &text) const {
+		const String &text) {
 	auto target = target_uri(uri);
 	// Open editor buffers carry unsaved text and always take precedence.
 	if (auto open = documents_.find(target); open != documents_.end()) return open->second;
 
+	auto file_path = path_for_file_uri(target);
+	std::optional<DiskStamp> stamp;
+	if (!project_root_.empty() && file_path) {
+		stamp = disk_stamp(*file_path);
+		if (!stamp) return {};
+		auto known = readonly_stamps_.find(target);
+		auto document = readonly_documents_.find(target);
+		if (known != readonly_stamps_.end() && known->second == *stamp && document != readonly_documents_.end())
+			return document->second;
+	}
 	auto snapshot = workspace_->document_snapshot(target);
-	if (!snapshot && text.is_empty()) return Ref<GDScriptLSPDocument>();
+	std::optional<std::string> source;
+	if (!project_root_.empty() && file_path) {
+		std::error_code error;
+		const bool exists = std::filesystem::exists(*file_path, error);
+		if (error) return {};
+		if (exists) {
+			++disk_reads_;
+			std::ifstream file(*file_path, std::ios::binary);
+			if (!file) return {};
+			source = std::string(std::istreambuf_iterator<char>(file), {});
+			if (file.bad()) return {};
+		}
+		const bool matches = snapshot && source && snapshot->source() == *source;
+		if (matches) {
+			requested_disk_sources_.erase(target);
+		} else if (snapshot || source || readonly_documents_.contains(target)) {
+			auto requested = requested_disk_sources_.find(target);
+			if (requested == requested_disk_sources_.end() || requested->second != source) {
+				requested_disk_sources_[target] = source;
+				refresh_files(PackedStringArray{uri});
+			}
+		}
+		if (!source) {
+			readonly_documents_.erase(target);
+			return {};
+		}
+	} else if (snapshot) {
+		source = snapshot->source();
+	} else if (!text.is_empty()) {
+		source = to_std(text);
+	} else {
+		return {};
+	}
+
 	auto &entry = readonly_documents_[target];
 	if (entry.is_null()) entry.instantiate();
-	if (snapshot) {
-		// Disk snapshots reuse version -1. Identity, not the document version, detects a refresh.
-		if (entry->snapshot() != snapshot)
+	// Keep a newer structural read while the asynchronous index still has old text.
+	if (!entry->snapshot() || entry->snapshot()->source() != *source) {
+		if (snapshot && snapshot->source() == *source) {
 			entry->set_snapshot(std::move(snapshot), readonly_revision_--);
-	} else {
-		// While indexing, parse the caller's text without registering a buffer or queuing work.
-		auto source = to_std(text);
-		if (!entry->snapshot() || entry->snapshot()->source() != source) {
-			auto path = to_std(uri);
-			if (auto file = path_for_file_uri(target))
-				path = "res://" + file->lexically_relative(project_root_).generic_string();
-			entry->set_snapshot(std::make_shared<Document>(target, path, std::move(source), -1,
+		} else {
+			auto path = file_path ? "res://" + file_path->lexically_relative(project_root_).generic_string() : to_std(uri);
+			entry->set_snapshot(std::make_shared<Document>(target, path, std::move(*source), -1,
 				Document::Analysis::Deferred), readonly_revision_--);
 		}
 	}
+	// A write racing this read must be checked again on the next lookup.
+	if (stamp && disk_stamp(*file_path) == stamp) readonly_stamps_[target] = *stamp;
+	else readonly_stamps_.erase(target);
 	return entry;
 }
 
@@ -237,7 +310,10 @@ void GDScriptLanguageService::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_document_ready", "uri"), &GDScriptLanguageService::is_document_ready);
 	ClassDB::bind_method(D_METHOD("document", "uri"), &GDScriptLanguageService::document);
 	ClassDB::bind_method(D_METHOD("close_document", "uri"), &GDScriptLanguageService::close_document);
-	ClassDB::bind_method(D_METHOD("refresh_files", "paths"), &GDScriptLanguageService::refresh_files);
+	ClassDB::bind_method(D_METHOD("refresh_files", "paths", "scan"), &GDScriptLanguageService::refresh_files, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("invalidate_files", "paths"), &GDScriptLanguageService::invalidate_files);
+	ClassDB::bind_method(D_METHOD("request_disk_scan"), &GDScriptLanguageService::request_disk_scan);
+	ClassDB::bind_method(D_METHOD("get_refresh_stats"), &GDScriptLanguageService::get_refresh_stats);
 	ClassDB::bind_method(D_METHOD("completion", "uri", "line", "utf16_column"),
 		&GDScriptLanguageService::completion);
 	ClassDB::bind_method(D_METHOD("completion_ex", "uri", "line", "utf16_column", "options"),
@@ -271,6 +347,8 @@ Error GDScriptLanguageService::open_workspace(const String &project_root, const 
 		index_thread_.join();
 	}
 	readonly_documents_.clear();
+	readonly_stamps_.clear();
+	requested_disk_sources_.clear();
 	ready_ = false;
 	semantic_busy_ = false;
 	++generation_;
@@ -287,11 +365,13 @@ Error GDScriptLanguageService::open_workspace(const String &project_root, const 
 	if (api.begins_with("res://")) api = ProjectSettings::get_singleton()->globalize_path(api);
 	{
 		std::lock_guard lock(queue_mutex_);
-		pending_.clear(); closes_.clear(); refreshes_.clear();
+		pending_.clear(); closes_.clear(); refreshes_.clear(); scan_pending_ = false;
 		for (const auto &[uri, doc] : documents_) pending_[uri] = doc->snapshot();
 		configuration_pending_ = true;
 	}
 	index_thread_ = std::jthread([this, root_value = project_root_, api_value = to_std(api), generation = generation_](std::stop_token stop) {
+		auto disk_stamps = scan_disk_stamps(root_value, stop);
+		++disk_scans_;
 		std::string error;
 		{
 			std::lock_guard semantic_lock(semantic_mutex_);
@@ -304,17 +384,36 @@ Error GDScriptLanguageService::open_workspace(const String &project_root, const 
 			decltype(pending_) pending;
 			decltype(closes_) closes, refreshes;
 			CompletionConfig configuration;
-			bool configure;
+			bool configure, scan;
 			{
 				std::unique_lock lock(queue_mutex_);
 				queue_changed_.wait(lock, stop, [this] {
-					return !pending_.empty() || !closes_.empty() || !refreshes_.empty() || configuration_pending_;
+					return !pending_.empty() || !closes_.empty() || !refreshes_.empty() || configuration_pending_ || scan_pending_;
 				});
 				if (stop.stop_requested()) return;
 				semantic_busy_ = true;
 				pending.swap(pending_); closes.swap(closes_); refreshes.swap(refreshes_);
 				configure = configuration_pending_; configuration_pending_ = false;
 				configuration = configuration_;
+				scan = scan_pending_; scan_pending_ = false;
+			}
+			if (scan) {
+				auto current = scan_disk_stamps(root_value, stop);
+				++disk_scans_;
+				for (const auto &[uri, stamp] : current) {
+					auto old = disk_stamps.find(uri);
+					if (old == disk_stamps.end() || old->second != stamp) refreshes.insert(uri);
+				}
+				for (const auto &[uri, stamp] : disk_stamps)
+					if (!current.contains(uri)) refreshes.insert(uri);
+				disk_stamps = std::move(current);
+			}
+			// Record targeted writes before indexing, so a later census does not redo their work.
+			for (const auto &uri : refreshes) {
+				if (auto path = path_for_file_uri(uri)) {
+					if (auto stamp = disk_stamp(*path); stamp && stamp->exists) disk_stamps[uri] = *stamp;
+					else disk_stamps.erase(uri);
+				}
 			}
 			std::vector<std::string> affected;
 			{
@@ -326,11 +425,13 @@ Error GDScriptLanguageService::open_workspace(const String &project_root, const 
 					workspace_->close_document(uri);
 					affected.push_back(uri);
 				}
-				for (const auto &uri : refreshes) {
-					auto before = workspace_->affected_documents({uri});
+				if (!refreshes.empty()) {
+					std::vector<std::string> paths(refreshes.begin(), refreshes.end());
+					auto before = workspace_->affected_documents(paths);
 					affected.insert(affected.end(), before.begin(), before.end());
-					workspace_->refresh_file(uri);
-					affected.push_back(uri);
+					workspace_->refresh_files(paths);
+					++refresh_batches_;
+					affected.insert(affected.end(), paths.begin(), paths.end());
 				}
 				for (const auto &[uri, snapshot] : pending) {
 					UpdateImpact impact;
@@ -398,13 +499,29 @@ void GDScriptLanguageService::close_document(const String &uri) {
 	queue_changed_.notify_all();
 }
 
-void GDScriptLanguageService::refresh_files(const PackedStringArray &paths) {
+void GDScriptLanguageService::invalidate_files(const PackedStringArray &paths) {
+	for (const auto &path : paths) readonly_stamps_.erase(target_uri(path));
+}
+
+void GDScriptLanguageService::request_disk_scan() { refresh_files({}, true); }
+
+Dictionary GDScriptLanguageService::get_refresh_stats() const {
+	Dictionary result;
+	result["disk_reads"] = static_cast<int64_t>(disk_reads_);
+	result["disk_scans"] = static_cast<int64_t>(disk_scans_.load());
+	result["refresh_batches"] = static_cast<int64_t>(refresh_batches_.load());
+	return result;
+}
+
+void GDScriptLanguageService::refresh_files(const PackedStringArray &paths, bool scan) {
+	invalidate_files(paths);
 	std::lock_guard lock(queue_mutex_);
 	for (const auto &path : paths) {
 		auto target = target_uri(path);
 		// Disk notifications must never replace an open editor buffer.
 		if (!documents_.contains(target)) refreshes_.insert(target);
 	}
+	scan_pending_ |= scan;
 	queue_changed_.notify_all();
 }
 

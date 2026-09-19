@@ -13,6 +13,8 @@ public:
         std::optional<int64_t> revision = {});
     const auto &snapshot() const { return _snapshot; }
     int64_t get_revision() const { return _revision; }
+    String get_source_code() const;
+    String get_source_hash();
     Dictionary parse_script(const String &script_path);
     Dictionary sparse_parse();
     void set_bracket_mode(bool enabled);
@@ -27,7 +29,7 @@ private:
     const TSTree *_tree = nullptr;
     uint32_t _src_len = 0;
     int64_t _full_revision = -1, _sparse_revision = -1;
-    String _full_path;
+    String _full_path, _source_hash;
     Dictionary _full_cache, _sparse_cache;
     struct BracketLine {
         std::vector<std::pair<int32_t, int32_t>> entries;

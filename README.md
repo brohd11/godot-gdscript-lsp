@@ -22,6 +22,18 @@ leaves the tree or the service is freed; call `attach()` again to reattach.
 Full dictionaries may be modified; sparse and live bracket dictionaries are
 shared, read-only views. `get_parse_revision()` is monotonic across attachments.
 
+Read-only `document_for_path()` checks saved source on access and repairs missed file
+notifications without registering an editor buffer. Changed syntax is available immediately;
+semantic refresh runs asynchronously. `GDScriptLSPDocument.get_source_code()` returns the
+exact text associated with its structural revision, including unsaved editor text when open.
+Filesystem scans refresh additions, modifications, deletions, and UID mappings. Unchanged
+reads retain their revision and schedule no indexing work. On access, high-resolution
+modification time and size gate source reads; explicit notifications force a recheck.
+`get_source_hash()` caches the hash per structural snapshot. File events are coalesced
+for 100 ms; pathless events scan metadata on the indexing worker, and a batch rebuilds
+the registry once. `get_refresh_stats()` reports read-only source reads, background
+metadata scans, and disk refresh batches for performance checks.
+
 Structural reads work before semantic indexing finishes. Native semantic reads
 are nonblocking and fall through while a revision is pending. Existing semantic
 API columns are UTF-16; use `GDScriptLSPService.utf16_column()` for CodeEdit columns.

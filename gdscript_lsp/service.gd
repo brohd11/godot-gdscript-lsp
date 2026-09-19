@@ -7,6 +7,9 @@ const SCRIPT_PATH := "res://addons/addon_lib/gdscript_lsp/service.gd"
 var native: Object
 var _buffers: Dictionary = {}
 var _revision := 0
+var _changed_paths: Dictionary = {}
+var _rescan_pending := false
+var _disk_scan_queued := false
 
 static func available() -> bool:
 	return ClassDB.class_exists(&"GDScriptLanguageService")
@@ -45,6 +48,7 @@ func _ready() -> void:
 		var filesystem := EditorInterface.get_resource_filesystem()
 		filesystem.resources_reload.connect(_refresh_files)
 		filesystem.resources_reimported.connect(_refresh_files)
+		filesystem.filesystem_changed.connect(_queue_disk_scan)
 
 func acquire(edit: CodeEdit, script_path: String) -> String:
 	var key := "%s:%s" % [edit.get_instance_id(), script_path]
@@ -98,12 +102,9 @@ func get_document(key: String) -> Object:
 		return null
 	return native.document(_buffers[key].uri)
 
-## Read-only structural view of a script as the workspace indexed it, for callers that only want to
-## READ another file. Unlike acquire(), this registers no buffer, pushes no document version and
-## invalidates nothing - so it cannot disturb the semantic index of scripts that depend on it.
-## Returns null when the extension predates document_for_path, so callers must handle a null.
-## `text` is only a fallback for files the workspace has not indexed yet (open_workspace is async);
-## when it has, the indexed copy wins and the text is ignored.
+## Current disk structure, with open editor buffers taking precedence. Changed disk content
+## repairs the native index; unchanged reads register no buffer and schedule no indexing.
+## `text` is a fallback only when the native service has no workspace.
 func get_disk_document(script_path: String, text := "") -> Object:
 	if not is_instance_valid(native) or script_path.is_empty() or script_path.contains("::"):
 		return null
@@ -138,7 +139,39 @@ func _discard(key: String) -> void:
 	native.close_document(record.uri)
 
 func _refresh_files(paths: PackedStringArray) -> void:
-	native.refresh_files(paths)
+	var relevant := PackedStringArray()
+	for path: String in paths:
+		if path.ends_with(".gd") or path.ends_with(".gd.uid") or path == "res://project.godot":
+			_changed_paths[path] = true
+			relevant.append(path)
+	if relevant.is_empty():
+		return
+	if native.has_method(&"invalidate_files"):
+		native.invalidate_files(relevant)
+	_schedule_refresh()
+
+func _queue_disk_scan() -> void:
+	_rescan_pending = true
+	_schedule_refresh()
+
+func _schedule_refresh() -> void:
+	if _disk_scan_queued:
+		return
+	_disk_scan_queued = true
+	get_tree().create_timer(0.1).timeout.connect(_refresh_changed_sources)
+
+func _refresh_changed_sources() -> void:
+	_disk_scan_queued = false
+	if not is_instance_valid(native):
+		return
+	var paths := PackedStringArray(_changed_paths.keys())
+	var scan := _rescan_pending or paths.is_empty()
+	_changed_paths.clear()
+	_rescan_pending = false
+	if native.has_method(&"request_disk_scan"):
+		native.refresh_files(paths, scan)
+	elif not paths.is_empty():
+		native.refresh_files(paths)
 
 func _exit_tree() -> void:
 	for key: String in _buffers.keys():

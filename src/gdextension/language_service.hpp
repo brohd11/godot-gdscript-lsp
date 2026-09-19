@@ -33,11 +33,14 @@ public:
 	bool is_document_ready(const godot::String &uri) const;
 	void update_document(const godot::String &uri, const godot::String &text, int64_t version);
 	godot::Ref<godot::GDScriptLSPDocument> document(const godot::String &uri) const;
-	// Read-only structural view; never registers an editor buffer or queues indexing.
+	// Current disk structure; unchanged reads register no buffer and queue no indexing.
 	godot::Ref<godot::GDScriptLSPDocument> document_for_path(const godot::String &uri,
-		const godot::String &text = {}) const;
+		const godot::String &text = {});
 	void close_document(const godot::String &uri);
-	void refresh_files(const godot::PackedStringArray &paths);
+	void refresh_files(const godot::PackedStringArray &paths, bool scan = false);
+	void invalidate_files(const godot::PackedStringArray &paths);
+	void request_disk_scan();
+	godot::Dictionary get_refresh_stats() const;
 	godot::Dictionary completion(const godot::String &uri, int line, int utf16_column) const;
 	godot::Dictionary completion_ex(const godot::String &uri, int line, int utf16_column,
 		const godot::Dictionary &options = {}) const;
@@ -60,11 +63,25 @@ protected:
 private:
 	std::string target_uri(const godot::String &uri) const;
 	bool current(const godot::String &uri) const;
+	struct DiskStamp {
+		std::filesystem::file_time_type modified{};
+		uintmax_t size = 0;
+		bool exists = false;
+		bool operator==(const DiskStamp &) const = default;
+	};
+	using DiskStamps = std::unordered_map<std::string, DiskStamp>;
+	static std::optional<DiskStamp> disk_stamp(const std::filesystem::path &path);
+	static DiskStamps scan_disk_stamps(const std::filesystem::path &root, std::stop_token stop);
+	DiskStamps readonly_stamps_;
+	uint64_t disk_reads_ = 0;
+	std::atomic_uint64_t disk_scans_ = 0, refresh_batches_ = 0;
+	bool scan_pending_ = false;
 	std::filesystem::path project_root_;
 	std::unordered_map<std::string, godot::Ref<godot::GDScriptLSPDocument>> documents_;
 	mutable std::unordered_map<std::string, godot::Ref<godot::GDScriptLSPDocument>> readonly_documents_;
 	// Distinct from editor versions and the -1 cache sentinel; survives workspace reopen.
 	mutable int64_t readonly_revision_ = -2;
+	std::unordered_map<std::string, std::optional<std::string>> requested_disk_sources_;
 	mutable std::mutex semantic_mutex_;
 	mutable std::mutex queue_mutex_;
 	std::condition_variable_any queue_changed_;
