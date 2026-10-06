@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='addon-integration-', dir=repo / 'build'
     (project / 'project.godot').write_text(editor_config)
     assert 'PASS: editor consumer initialization' in run(['--editor', '--quit-after', '600'])
     (project / 'project.godot').write_text(base_config)
-    shutil.copytree(repo / 'gdscript_lsp', project / 'addons/addon_lib/gdscript_lsp')
+    shutil.copytree(repo / 'gdscript_lsp', project / 'addons/_lib/gdscript_lsp')
     run(['--editor', '--quit-after', '60'])
     run(['--script', 'res://test.gd'])
     run(['--script', 'res://scratch_reader.gd'])

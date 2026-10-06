@@ -4,7 +4,7 @@ var service: Object
 var diagnostics_signal_received := false
 
 func _initialize() -> void:
-	var load_status := GDExtensionManager.load_extension("res://addons/addon_lib/gdscript_lsp/gdscript_lsp.gdextension")
+	var load_status := GDExtensionManager.load_extension("res://addons/_lib/gdscript_lsp/gdscript_lsp.gdextension")
 	if load_status not in [GDExtensionManager.LOAD_STATUS_OK, GDExtensionManager.LOAD_STATUS_ALREADY_LOADED]:
 		push_error("could not load GDExtension: %s" % load_status)
 		quit(1)

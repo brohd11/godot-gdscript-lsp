@@ -22,7 +22,7 @@ repo = Path(__file__).resolve().parents[1]
 (repo / 'build').mkdir(exist_ok=True)
 staging = tempfile.TemporaryDirectory(prefix='test-project-', dir=repo / 'build')
 project = Path(staging.name)
-addon = project / 'addons/addon_lib/gdscript_lsp'
+addon = project / 'addons/_lib/gdscript_lsp'
 if args.archive:
     with zipfile.ZipFile(args.archive) as archive:
         archive.extractall(project)
@@ -45,7 +45,7 @@ wide_project.mkdir(parents=True, exist_ok=True)
 shutil.copy2(wide_fixture, wide_project / 'limits.gd')
 (wide_project / 'project.godot').write_text('[application]\nconfig/name="Wide expressions"\n')
 if args.legacy_addon:
-    shutil.copytree(args.legacy_addon, project / 'addons/addon_lib/tree_sitter_gd', dirs_exist_ok=True)
+    shutil.copytree(args.legacy_addon, project / 'addons/_lib/tree_sitter_gd', dirs_exist_ok=True)
 (project / 'project.godot').write_text('[application]\nconfig/name="Language service tests"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n')
 (project / 'fixture.gd').write_text('extends RefCounted\nvar saved: int = 1\n')
 env = os.environ.copy()
@@ -76,7 +76,7 @@ for command in [
 # Stage only wrapper scripts so this check cannot accidentally load a native backend.
 with tempfile.TemporaryDirectory(prefix='test-no-extension-', dir=repo / 'build') as temporary:
     absent_project = Path(temporary)
-    absent_addon = absent_project / 'addons/addon_lib/gdscript_lsp'
+    absent_addon = absent_project / 'addons/_lib/gdscript_lsp'
     absent_addon.mkdir(parents=True)
     for script in ('service.gd', 'code_edit_manager.gd'):
         shutil.copy2(addon / script, absent_addon / script)

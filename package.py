@@ -48,7 +48,7 @@ def package(version, core, development=False):
     archive = output / ('gdscript-lsp' + suffix + '.zip')
     with tempfile.TemporaryDirectory(prefix='gdscript-lsp-package-') as temporary:
         stage = Path(temporary)
-        target = stage / 'addons/addon_lib/gdscript_lsp'
+        target = stage / 'addons/_lib/gdscript_lsp'
         shutil.copytree(addon, target, ignore=shutil.ignore_patterns('*.os', '*.lib', '*.exp', '.DS_Store'))
         (target / 'data').mkdir(exist_ok=True)
         shutil.copy2(metadata, target / 'data' / metadata.name)

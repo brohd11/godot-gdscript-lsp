@@ -1,6 +1,6 @@
 extends SceneTree
 
-const Parser = preload("res://addons/addon_lib/gdscript_parser/gdscript_parser.gd")
+const Parser = preload("res://addons/_lib/gdscript_parser/gdscript_parser.gd")
 const Highlighter = preload("res://addons/syntax_plus/src/highlighter/highlighter_logic.gd")
 const EditorParser = Highlighter.EditorGDScriptParser
 const SCRIPT_A := "res://highlight_a.gd"

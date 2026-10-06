@@ -1,6 +1,6 @@
 extends SceneTree
 
-const Manager = preload("res://addons/addon_lib/gdscript_lsp/code_edit_manager.gd")
+const Manager = preload("res://addons/_lib/gdscript_lsp/code_edit_manager.gd")
 var failures := 0
 
 func check(value: bool, message: String) -> void:
@@ -13,7 +13,7 @@ func _initialize() -> void:
 
 func _run() -> void:
 	check(not ClassDB.class_exists(&"GDScriptLanguageService"), "extension is absent")
-	var service = load("res://addons/addon_lib/gdscript_lsp/service.gd").new()
+	var service = load("res://addons/_lib/gdscript_lsp/service.gd").new()
 	check(service.get_disk_document("res://empty.gd", "var value: int\n") == null, "missing backend declines read-only structure")
 	service.free()
 	var edit := CodeEdit.new()

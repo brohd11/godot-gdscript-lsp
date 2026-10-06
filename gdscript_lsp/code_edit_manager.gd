@@ -2,7 +2,7 @@
 class_name GDScriptLSPCodeEditManager
 extends RefCounted
 
-const Service = preload("res://addons/addon_lib/gdscript_lsp/service.gd")
+const Service = preload("res://addons/_lib/gdscript_lsp/service.gd")
 var _service: Node
 var _edit: CodeEdit
 var _script_path := ""

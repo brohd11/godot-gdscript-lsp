@@ -361,7 +361,7 @@ Error GDScriptLanguageService::open_workspace(const String &project_root, const 
 	}
 	project_root_ = next_root;
 	if (options.has("configuration")) set_configuration(options["configuration"]);
-	String api = options.get("native_api_path", "res://addons/addon_lib/gdscript_lsp/data/godot-4.6-extension-api.json");
+	String api = options.get("native_api_path", "res://addons/_lib/gdscript_lsp/data/godot-4.6-extension-api.json");
 	if (api.begins_with("res://")) api = ProjectSettings::get_singleton()->globalize_path(api);
 	{
 		std::lock_guard lock(queue_mutex_);

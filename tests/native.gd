@@ -1,7 +1,7 @@
 extends SceneTree
 
-const Service = preload("res://addons/addon_lib/gdscript_lsp/service.gd")
-const Manager = preload("res://addons/addon_lib/gdscript_lsp/code_edit_manager.gd")
+const Service = preload("res://addons/_lib/gdscript_lsp/service.gd")
+const Manager = preload("res://addons/_lib/gdscript_lsp/code_edit_manager.gd")
 var failures := 0
 var service: Object
 var revision := 0

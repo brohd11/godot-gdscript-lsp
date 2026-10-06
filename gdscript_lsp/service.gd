@@ -3,7 +3,7 @@ class_name GDScriptLSPService
 extends Node
 
 ## One shared service per scene tree. This script has no AddonLib dependencies.
-const SCRIPT_PATH := "res://addons/addon_lib/gdscript_lsp/service.gd"
+const SCRIPT_PATH := "res://addons/_lib/gdscript_lsp/service.gd"
 var native: Object
 var _buffers: Dictionary = {}
 var _revision := 0
@@ -43,7 +43,9 @@ static func get_instance() -> Node:
 
 func _ready() -> void:
 	native = ClassDB.instantiate(&"GDScriptLanguageService")
-	native.open_workspace(ProjectSettings.globalize_path("res://"))
+	# Explicit so the native default path never has to match where the addon is installed.
+	var api := SCRIPT_PATH.get_base_dir().path_join("data/godot-4.6-extension-api.json")
+	native.open_workspace(ProjectSettings.globalize_path("res://"), {"native_api_path": api})
 	if Engine.is_editor_hint():
 		var filesystem := EditorInterface.get_resource_filesystem()
 		filesystem.resources_reload.connect(_refresh_files)

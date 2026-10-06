@@ -18,7 +18,7 @@ func _run() -> void:
 		var file := FileAccess.open(path, FileAccess.WRITE)
 		file.store_string("extends RefCounted\nconst VALUE: int = 7\n" + ("const URString = preload(\"res://scratch_target.gd\")\n" if path == DEPENDENCY else ""))
 		file.close()
-	var parser_script = load("res://addons/addon_lib/gdscript_parser/gdscript_parser.gd")
+	var parser_script = load("res://addons/_lib/gdscript_parser/gdscript_parser.gd")
 	var owner = parser_script.new()
 	owner.active_parser = owner
 	owner.set_parser_cache({})
@@ -26,7 +26,7 @@ func _run() -> void:
 	owner.set_current_script(load(OWNER))
 	owner.set_source_code(load(OWNER).source_code)
 	owner.parse()
-	var service = load("res://addons/addon_lib/gdscript_lsp/service.gd").get_instance()
+	var service = load("res://addons/_lib/gdscript_lsp/service.gd").get_instance()
 	for attempt in range(500):
 		if service.native.is_document_ready(OWNER):
 			break

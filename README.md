@@ -3,7 +3,7 @@
 Optional native parsing and completion support for Godot 4.6. One addon package
 contains Windows/Linux x86_64 and universal macOS libraries (macOS 14+).
 Install the release ZIP over the project root. It creates
-`addons/addon_lib/gdscript_lsp`. There is no editor plugin to enable and no
+`addons/_lib/gdscript_lsp`. There is no editor plugin to enable and no
 AddonLib dependency. AddonLib, SyntaxPlus and Code Completions discover it when
 installed; their GDScript paths remain available without it.
 
