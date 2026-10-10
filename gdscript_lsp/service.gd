@@ -52,7 +52,7 @@ func _ready() -> void:
 		filesystem.resources_reimported.connect(_refresh_files)
 		filesystem.filesystem_changed.connect(_queue_disk_scan)
 
-func acquire(edit: CodeEdit, script_path: String) -> String:
+func acquire(edit: TextEdit, script_path: String) -> String:
 	var key := "%s:%s" % [edit.get_instance_id(), script_path]
 	if _buffers.has(key):
 		_buffers[key].users += 1
@@ -82,7 +82,7 @@ func _editor_exiting(key: String) -> void:
 func _check_editor_left(key: String) -> void:
 	if not _buffers.has(key):
 		return
-	var edit: CodeEdit = _buffers[key].edit.get_ref()
+	var edit: TextEdit = _buffers[key].edit.get_ref()
 	if not is_instance_valid(edit) or not edit.is_inside_tree():
 		_discard(key)
 
@@ -90,7 +90,7 @@ func sync_buffer(key: String, force := false) -> int:
 	if not _buffers.has(key):
 		return -1
 	var record: Dictionary = _buffers[key]
-	var edit: CodeEdit = record.edit.get_ref()
+	var edit: TextEdit = record.edit.get_ref()
 	if not is_instance_valid(edit):
 		_discard(key)
 		return -1
@@ -137,7 +137,7 @@ func _discard(key: String) -> void:
 	if not _buffers.has(key):
 		return
 	var record: Dictionary = _buffers[key]
-	var edit: CodeEdit = record.edit.get_ref()
+	var edit: TextEdit = record.edit.get_ref()
 	if is_instance_valid(edit):
 		for pair in [[edit.text_changed, _changed.bind(key)], [edit.text_set, _replaced.bind(key)],
 			[edit.tree_exiting, _editor_exiting.bind(key)]]:

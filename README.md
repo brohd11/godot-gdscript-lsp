@@ -12,12 +12,12 @@ installed; their GDScript paths remain available without it.
 `service.gd` extends `Node` directly. `get_instance()` finds or creates
 `EditorNode/EditorSingletons/GDScriptLSPService` in the editor, or
 `/root/GDScriptLSPService` at runtime, on the main thread.
-`code_edit_manager.gd` exposes `GDScriptLSPCodeEditManager`: attach a CodeEdit and
+`code_edit_manager.gd` exposes `GDScriptLSPCodeEditManager`: attach a TextEdit (usually a CodeEdit) and
 script path, then call `parse()`, `sparse_parse()`, or inspect `parser.get_brackets()`.
 Managers share one document per attached source. Detach managers when finished.
 Use `is_attached()` to distinguish a live attachment (including an empty file)
 from an unavailable backend or a detached/discarded buffer. It does not synchronize
-the buffer or wait for semantic indexing. It becomes false when the CodeEdit
+the buffer or wait for semantic indexing. It becomes false when the edit
 leaves the tree or the service is freed; call `attach()` again to reattach.
 Full dictionaries may be modified; sparse and live bracket dictionaries are
 shared, read-only views. `get_parse_revision()` is monotonic across attachments.

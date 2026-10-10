@@ -4,7 +4,7 @@ extends RefCounted
 
 const Service = preload("res://addons/_lib/gdscript_lsp/service.gd")
 var _service: Node
-var _edit: CodeEdit
+var _edit: TextEdit
 var _script_path := ""
 var _key := ""
 var _seen_revision := -1
@@ -18,7 +18,7 @@ func is_attached() -> bool:
 	return is_instance_valid(_service) and is_instance_valid(_edit) \
 		and not _key.is_empty() and is_instance_valid(_service.get_document(_key))
 
-func attach(edit: CodeEdit, script_path := "") -> void:
+func attach(edit: TextEdit, script_path := "") -> void:
 	if _edit == edit and _script_path == script_path and is_attached():
 		return
 	detach()
