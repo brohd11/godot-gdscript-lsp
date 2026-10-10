@@ -74,8 +74,17 @@ func _changed(key: String) -> void:
 func _replaced(key: String) -> void:
 	sync_buffer(key, true)
 
+# reparent() also fires tree_exiting (script_tabs moves the CodeEdit on every tab switch),
+# so only discard once the edit is freed or still out of the tree.
 func _editor_exiting(key: String) -> void:
-	_discard(key)
+	_check_editor_left.call_deferred(key)
+
+func _check_editor_left(key: String) -> void:
+	if not _buffers.has(key):
+		return
+	var edit: CodeEdit = _buffers[key].edit.get_ref()
+	if not is_instance_valid(edit) or not edit.is_inside_tree():
+		_discard(key)
 
 func sync_buffer(key: String, force := false) -> int:
 	if not _buffers.has(key):

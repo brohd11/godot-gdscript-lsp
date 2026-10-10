@@ -160,7 +160,16 @@ func _run() -> void:
 	check(a.get_parse_revision() > shared_revision, "reattachment uses monotonic revisions")
 	a.set_script_path("")
 	check(a.get_uri().begins_with("untitled:"), "unnamed buffer has a session identity")
+	# reparent fires tree_exiting too; the service defers the discard so a move keeps the buffer
+	var holder := Node.new()
+	root.add_child(holder)
+	edit.reparent(holder)
+	await create_timer(0.05).timeout
+	check(a.is_attached(), "reparented CodeEdit stays attached")
+	edit.reparent(root)
+	holder.free()
 	root.remove_child(edit)
+	await create_timer(0.05).timeout
 	check_unattached(a, "CodeEdit removed from tree")
 	root.add_child(edit)
 	a.attach(edit, "")
