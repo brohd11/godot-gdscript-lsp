@@ -27,6 +27,9 @@ func check_unattached(manager: RefCounted, label: String) -> void:
 	check(manager.get_parse_revision() == -1 and manager.get_uri().is_empty(), label + " has no revision or URI")
 	check(manager.parse() == {} and manager.sparse_parse() == {"members": {}, "lines": {}}, label + " returns empty projections")
 
+func service_connections(edit: TextEdit) -> int:
+	return edit.text_changed.get_connections().filter(func(c): return c.callable.get_method() == &"_changed").size()
+
 func _run() -> void:
 	service = ClassDB.instantiate(&"GDScriptLanguageService")
 	# Direct structural reads require neither a workspace nor a scene-tree owner.
@@ -156,6 +159,24 @@ func _run() -> void:
 	check(not live.is_empty() and b.parser != null, "one detach preserves another consumer")
 	b.detach()
 	check(live.is_empty(), "last detach clears brackets")
+	# A rename re-keys one manager while another still holds the old path on the same edit.
+	a.attach(edit, "res://before.gd")
+	b.attach(edit, "res://before.gd")
+	a.set_script_path("res://after.gd")
+	check(service_connections(edit) == 1, "renamed buffer shares one connection per edit")
+	edit.text = "var renamed := 1\n"
+	check(a.parse()[""].members.has("renamed") and b.parse()[""].members.has("renamed"), "both paths see edits after rename")
+	b.detach()
+	check(service_connections(edit) == 1, "discarding the old path keeps the renamed connection")
+	edit.text = "var renamed_again := 1\n"
+	check(a.parse()[""].members.has("renamed_again"), "renamed buffer syncs after old path is discarded")
+	b.attach(edit, "res://before.gd")
+	root.remove_child(edit)
+	await create_timer(0.05).timeout
+	check_unattached(a, "renamed buffer removed from tree")
+	check_unattached(b, "old path removed from tree")
+	check(service_connections(edit) == 0, "tree exit disconnects every key's edit")
+	root.add_child(edit)
 	a.attach(edit, "res://another.gd")
 	check(a.get_parse_revision() > shared_revision, "reattachment uses monotonic revisions")
 	a.set_script_path("")

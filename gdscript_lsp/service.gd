@@ -6,6 +6,7 @@ extends Node
 const SCRIPT_PATH := "res://addons/_lib/gdscript_lsp/service.gd"
 var native: Object
 var _buffers: Dictionary = {}
+var _edits: Dictionary = {} # edit instance id -> buffer keys sharing its signal connections
 var _revision := 0
 var _changed_paths: Dictionary = {}
 var _rescan_pending := false
@@ -60,30 +61,38 @@ func acquire(edit: TextEdit, script_path: String) -> String:
 	var uri := script_path
 	if uri.is_empty() or uri.contains("::"):
 		uri = "untitled:gdscript-lsp/%s" % key
-	_buffers[key] = {"edit": weakref(edit), "uri": uri, "users": 1,
+	var edit_id := edit.get_instance_id()
+	_buffers[key] = {"edit": weakref(edit), "edit_id": edit_id, "uri": uri, "users": 1,
 		"version": -1, "revision": -1, "source": "", "initialized": false}
-	edit.text_changed.connect(_changed.bind(key))
-	edit.text_set.connect(_replaced.bind(key))
-	edit.tree_exiting.connect(_editor_exiting.bind(key))
+	# Godot ignores bound values when comparing callables, so one edit gets one connection
+	# per signal; a rename adds a second key for the same edit while the old one is held.
+	if not _edits.has(edit_id):
+		_edits[edit_id] = []
+		edit.text_changed.connect(_changed.bind(edit_id))
+		edit.text_set.connect(_replaced.bind(edit_id))
+		edit.tree_exiting.connect(_editor_exiting.bind(edit_id))
+	_edits[edit_id].append(key)
 	sync_buffer(key)
 	return key
 
-func _changed(key: String) -> void:
-	sync_buffer(key)
+func _changed(edit_id: int) -> void:
+	for key: String in _edits.get(edit_id, []).duplicate():
+		sync_buffer(key)
 
-func _replaced(key: String) -> void:
-	sync_buffer(key, true)
+func _replaced(edit_id: int) -> void:
+	for key: String in _edits.get(edit_id, []).duplicate():
+		sync_buffer(key, true)
 
 # reparent() also fires tree_exiting (script_tabs moves the CodeEdit on every tab switch),
 # so only discard once the edit is freed or still out of the tree.
-func _editor_exiting(key: String) -> void:
-	_check_editor_left.call_deferred(key)
+func _editor_exiting(edit_id: int) -> void:
+	_check_editor_left.call_deferred(edit_id)
 
-func _check_editor_left(key: String) -> void:
-	if not _buffers.has(key):
+func _check_editor_left(edit_id: int) -> void:
+	var edit := instance_from_id(edit_id) as TextEdit
+	if is_instance_valid(edit) and edit.is_inside_tree():
 		return
-	var edit: TextEdit = _buffers[key].edit.get_ref()
-	if not is_instance_valid(edit) or not edit.is_inside_tree():
+	for key: String in _edits.get(edit_id, []).duplicate():
 		_discard(key)
 
 func sync_buffer(key: String, force := false) -> int:
@@ -137,12 +146,17 @@ func _discard(key: String) -> void:
 	if not _buffers.has(key):
 		return
 	var record: Dictionary = _buffers[key]
-	var edit: TextEdit = record.edit.get_ref()
-	if is_instance_valid(edit):
-		for pair in [[edit.text_changed, _changed.bind(key)], [edit.text_set, _replaced.bind(key)],
-			[edit.tree_exiting, _editor_exiting.bind(key)]]:
-			if pair[0].is_connected(pair[1]):
-				pair[0].disconnect(pair[1])
+	var edit_id: int = record.edit_id
+	var keys: Array = _edits.get(edit_id, [])
+	keys.erase(key)
+	if keys.is_empty():
+		_edits.erase(edit_id)
+		var edit: TextEdit = record.edit.get_ref()
+		if is_instance_valid(edit):
+			for pair in [[edit.text_changed, _changed.bind(edit_id)], [edit.text_set, _replaced.bind(edit_id)],
+				[edit.tree_exiting, _editor_exiting.bind(edit_id)]]:
+				if pair[0].is_connected(pair[1]):
+					pair[0].disconnect(pair[1])
 	_buffers.erase(key)
 	for other: Dictionary in _buffers.values():
 		if other.uri == record.uri:
