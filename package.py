@@ -54,7 +54,7 @@ def package(version, core, development=False):
         shutil.copy2(metadata, target / 'data' / metadata.name)
         for name in ['LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.md']:
             shutil.copy2(ROOT / name, target / name)
-        (target / 'version.cfg').write_text('[plugin]\nversion="%s"\n' % version)
+        (target / 'package.cfg').write_text('[package]\nversion="%s"\n' % version)
         (target / 'build.json').write_text(json.dumps({'version': version, 'core_revision': commit,
             'core_dirty': dirty, 'development': development}, indent=2) + '\n')
         with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as z:
